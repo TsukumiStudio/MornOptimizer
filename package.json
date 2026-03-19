@@ -4,6 +4,7 @@
   "displayName": "MornOptimizer",
   "description": "Unityプロジェクトのビルドサイズを削減するためのエディタツール。パッケージ・asmdef・テクスチャ・アセット・ビルド設定を最適化する。",
   "unity": "6000.0",
+  "license": "Unlicense",
   "author": {
     "name": "TsukumiStudio"
   },
