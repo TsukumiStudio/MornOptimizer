@@ -1,20 +1,11 @@
 # MornOptimizer
 
 <p align="center">
-  <img src="MornOptimizer.png" alt="MornOptimizer" width="128" />
-</p>
-
-<p align="center">
-  <b>Slim down your Unity build</b>
+  <img src="MornOptimizer.png" alt="MornOptimizer" width="640" />
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/github/license/TsukumiStudio/MornOptimizer" alt="License" />
-</p>
-
-<p align="center">
-  <b>Package Cleanup</b> · <b>Asmdef Trimming</b> · <b>Texture Optimization</b><br/>
-  <b>Transparent Trim</b> · <b>Unreferenced Assets</b> · <b>Build Settings</b>
 </p>
 
 ## 概要
