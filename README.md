@@ -1,8 +1,17 @@
 # MornOptimizer
 
+<p align="center">
+  Unity プロジェクトのビルドサイズを削減するエディタツール
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/github/license/TsukumiStudio/MornOptimizer" alt="License" />
+</p>
+
 ## 概要
 
-Unityプロジェクトのビルドサイズを削減するためのエディタツール。パッケージ・asmdef・テクスチャ・アセット・ビルド設定を6つのタブで最適化する。
+MornOptimizer は、Unity プロジェクトの不要なパッケージ・asmdef・テクスチャ設定・未参照アセットを検出し、ビルドサイズを削減するためのエディタウィンドウです。
+`Tools > MornOptimizer` から開けます。
 
 ## 導入方法
 
@@ -14,57 +23,54 @@ https://github.com/TsukumiStudio/MornOptimizer.git
 
 `Window > Package Manager > + > Add package from git URL...` に貼り付けてください。
 
-## 依存関係
+## 機能
 
-| 種別 | 名前 |
-|------|------|
-| Mornライブラリ | なし |
+### パッケージ
 
-## 使い方
+- **未使用パッケージ検出** — DLL参照・型リフレクション・Scene/Prefab・ファイル拡張子・パッケージ間参照の5層で判定
+- **Feature展開** — `com.unity.feature.2d` 等をサブパッケージに分解して個別判定
+- **連鎖削除** — 未使用パッケージ選択時、連鎖で不要になるパッケージを1段階ずつ表示
+- **削除バリデーション** — 他パッケージから参照されているパッケージの削除をブロック
 
-`Tools > MornOptimizer` でウィンドウを開く。
+### Asmdef詳細
 
-### パッケージタブ
+- **asmdef単位の使用判定** — Assets/コード・Scene/Prefab・パッケージ間参照（CompilationPipelineベース）で解析
+- **カスタムパッケージ化** — パッケージを `CustomPackages/` にコピーし、選択したasmdefを削除
+- **依存クリーンアップ** — 削除後、`package.json` の不要な依存を自動除去
+- **連鎖検出** — 削除で不要になるasmdefを連鎖的に表示
 
-未使用パッケージを検出・削除する。
+### テクスチャ
 
-- `packages-lock.json` から全インストール済みパッケージを解析
-- DLL参照・型リフレクション・Scene/Prefabコンポーネント・ファイル拡張子の5層で使用判定
-- パッケージ間のasmdef参照・プリコンパイルDLL参照も検出し、他パッケージから参照されているものは使用中と判定
-- Featureパッケージ（`com.unity.feature.2d` 等）をサブパッケージに展開して個別判定
-- パッケージ間依存を `← パッケージ名` で可視化
-- 未使用パッケージを選択すると、連鎖で不要になるパッケージにもチェックボックスが出現（1段階ずつ）
+- **MaxSizeチェック** — 元画像より大きい MaxSize を検出・修正
+- **圧縮チェック** — 非圧縮テクスチャを検出・修正
+- **ミップマップチェック** — UI/Sprite の不要なミップマップを検出・修正
 
-### Asmdef詳細タブ
+### 余白トリム
 
-パッケージ内のasmdef単位で使用状況を解析し、未使用アセンブリを削除する。
+- **透明余白の検出** — アルファ値でしきい値判定し、非透明領域を特定
+- **4の倍数アライメント** — トリミング後のサイズを4の倍数に調整
+- **削減量表示** — 推定ファイルサイズ削減量をソート表示
 
-- 複数asmdefを持つパッケージの個別解析
-- Assets/コード・Scene/Prefab・パッケージ間参照（CompilationPipelineベース）の3層で使用判定
-- 未使用asmdefをチェックして「カスタムパッケージ化して削除」で実行
-- パッケージを`CustomPackages/`にコピーし、選択したasmdefのディレクトリを削除
-- 削除後、`package.json`の不要な依存を自動クリーンアップ
-- 連鎖で不要になるasmdefにもチェックボックスが出現
+### 未参照アセット
 
-### テクスチャタブ
+- **依存解析** — Scene・Prefab・ScriptableObject からの依存を解析
+- **グループ表示** — 型ごとにグループ化し、ファイルサイズ付きで表示
+- **個別削除** — 各アセットを選択・削除ボタンで操作
+- ※ `Resources.Load()` や Addressables 経由の参照は検出不可
 
-テクスチャのインポート設定を解析し、過大なMaxSize・圧縮なし・不要なミップマップを検出。一括修正ボタンで推奨設定に変更する。
+### ビルド設定
 
-### 余白トリムタブ
-
-PNG画像の透明余白を自動検出し、トリミング・4の倍数アライメントを行う。推定ファイルサイズ削減量を表示する。
-
-### 未参照アセットタブ
-
-`Assets/_Develop/` 内でどのシーン・Prefab・ScriptableObjectからも参照されていないアセットを検出。型ごとにグループ化し、ファイルサイズ付きで表示する。個別に選択・削除が可能。
-
-※ `Resources.Load()` や Addressables 経由の参照は検出できない。
-
-### ビルド設定タブ
-
-Scripting Backend・Managed Stripping Level・Development Build・WebGL圧縮の推奨値を表示。個別修正・一括修正ボタンで推奨設定に変更する。
+- **Scripting Backend** — IL2CPP を推奨
+- **Managed Stripping Level** — Medium（WebGLはHigh）を推奨
+- **Development Build** — OFF を推奨
+- **WebGL圧縮** — Brotli を推奨
 
 ## 注意事項
 
-- パッケージ削除やasmdefカスタム化は**元に戻せない操作**です。実行前に必ずgitコミットまたはバックアップを作成してください。
-- `CustomPackages/` にカスタムパッケージ化したパッケージは、パッケージマネージャーの自動更新対象外になります。
+- パッケージ削除やasmdefカスタム化は**元に戻せない操作**です
+- 実行前に必ず git コミットまたはバックアップを作成してください
+- `CustomPackages/` のパッケージはパッケージマネージャーの自動更新対象外です
+
+## ライセンス
+
+[The Unlicense](LICENSE)
