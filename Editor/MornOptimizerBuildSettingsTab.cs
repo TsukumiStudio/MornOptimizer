@@ -118,9 +118,7 @@ namespace MornLib
 
             // Managed Stripping Level
             var stripping = PlayerSettings.GetManagedStrippingLevel(namedTarget);
-            var recommendedStripping = buildTarget == BuildTarget.WebGL
-                ? ManagedStrippingLevel.High
-                : ManagedStrippingLevel.Medium;
+            var recommendedStripping = ManagedStrippingLevel.High;
             checks.Add(new SettingCheck
             {
                 SettingName = "Managed Stripping Level",
@@ -144,13 +142,14 @@ namespace MornLib
             if (buildTarget == BuildTarget.WebGL)
             {
                 var compression = PlayerSettings.WebGL.compressionFormat;
+                // Gzip 推奨: unityroom 等の主要ホスティングが Brotli 非対応のため
                 checks.Add(new SettingCheck
                 {
                     SettingName = "WebGL Compression",
                     CurrentValue = compression.ToString(),
-                    RecommendedValue = "Brotli",
-                    IsOptimal = compression == WebGLCompressionFormat.Brotli,
-                    ApplyAction = () => PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Brotli,
+                    RecommendedValue = "Gzip",
+                    IsOptimal = compression == WebGLCompressionFormat.Gzip,
+                    ApplyAction = () => PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Gzip,
                 });
             }
 

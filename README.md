@@ -1,11 +1,20 @@
 # MornOptimizer
 
 <p align="center">
-  Unity プロジェクトのビルドサイズを削減するエディタツール
+  <img src="MornOptimizer.png" alt="MornOptimizer" width="128" />
+</p>
+
+<p align="center">
+  <b>Slim down your Unity build</b>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/github/license/TsukumiStudio/MornOptimizer" alt="License" />
+</p>
+
+<p align="center">
+  <b>Package Cleanup</b> · <b>Asmdef Trimming</b> · <b>Texture Optimization</b><br/>
+  <b>Transparent Trim</b> · <b>Unreferenced Assets</b> · <b>Build Settings</b>
 </p>
 
 ## 概要
@@ -61,9 +70,9 @@ https://github.com/TsukumiStudio/MornOptimizer.git
 ### ビルド設定
 
 - **Scripting Backend** — IL2CPP を推奨
-- **Managed Stripping Level** — Medium（WebGLはHigh）を推奨
+- **Managed Stripping Level** — High を推奨
 - **Development Build** — OFF を推奨
-- **WebGL圧縮** — Brotli を推奨
+- **WebGL圧縮** — Gzip を推奨（unityroom 等が Brotli 非対応のため）
 
 ## 注意事項
 
