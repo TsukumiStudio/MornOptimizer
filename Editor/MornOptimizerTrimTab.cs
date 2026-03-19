@@ -10,7 +10,7 @@ namespace MornLib
 {
     /// <summary>
     /// PNG画像の透明余白をトリミングし、幅・高さを4の倍数に調整するタブ。
-    /// 余白を削って4の倍数にならない場合は、最小限パディングして4の倍数にする。
+    /// 余白がなくても4の倍数でない画像はパディングして4の倍数にする。
     /// </summary>
     public sealed class MornOptimizerTrimTab : MornOptimizerTabBase
     {
@@ -40,7 +40,7 @@ namespace MornLib
             {
                 EditorGUILayout.HelpBox(
                     "PNG画像の透明余白を検出し、4の倍数サイズにトリミングします。\n" +
-                    "削って4の倍数にできない場合は最小限パディングします。",
+                    "余白がなくても4の倍数でない画像はパディングして4の倍数にします。",
                     MessageType.Info);
                 return;
             }
@@ -246,16 +246,11 @@ namespace MornLib
                 newH = CeilTo4(contentH);
             }
 
-            // 元サイズと同じかそれ以上なら意味なし
-            if (newW >= width && newH >= height)
-            {
-                return null;
-            }
-
-            // 片方だけ大きくなる場合でも、総ピクセル数が減れば意味あり
             var originalPixels = (long)width * height;
             var newPixels = (long)newW * newH;
-            if (newPixels >= originalPixels)
+
+            // サイズが変わらない場合はスキップ
+            if (newW == width && newH == height)
             {
                 return null;
             }
