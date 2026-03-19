@@ -4,6 +4,16 @@
 
 Unityプロジェクトのビルドサイズを削減するためのエディタツール。パッケージ・asmdef・テクスチャ・アセット・ビルド設定を6つのタブで最適化する。
 
+## 導入方法
+
+Unity Package Manager で以下の Git URL を追加:
+
+```
+https://github.com/TsukumiStudio/MornOptimizer.git
+```
+
+`Window > Package Manager > + > Add package from git URL...` に貼り付けてください。
+
 ## 依存関係
 
 | 種別 | 名前 |
