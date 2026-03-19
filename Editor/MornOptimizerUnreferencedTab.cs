@@ -83,6 +83,11 @@ namespace MornLib
                         }
                     }
 
+                    if (GUILayout.Button("削除", GUILayout.Width(40)))
+                    {
+                        DeleteAsset(result);
+                    }
+
                     EditorGUILayout.EndHorizontal();
                 }
 
@@ -90,6 +95,31 @@ namespace MornLib
             }
 
             EditorGUILayout.EndScrollView();
+        }
+
+        private void DeleteAsset(UnreferencedResult result)
+        {
+            if (!EditorUtility.DisplayDialog(
+                    "⚠ アセット削除",
+                    $"{result.AssetPath} を削除します ({FormatSize(result.FileSize)})\n\n" +
+                    "【警告】この操作は元に戻せません。\n" +
+                    "実行前に必ず git の差分を確認し、コミットまたはローカルバックアップを作成してください。\n" +
+                    "この操作によって発生した問題について、ツール側では一切の責任を負いません。",
+                    "理解した上で削除する",
+                    "キャンセル"))
+            {
+                return;
+            }
+
+            if (AssetDatabase.DeleteAsset(result.AssetPath))
+            {
+                Debug.Log($"[MornOptimizer] 削除しました: {result.AssetPath}");
+                _results.Remove(result);
+            }
+            else
+            {
+                Debug.LogWarning($"[MornOptimizer] 削除に失敗: {result.AssetPath}");
+            }
         }
 
         private IEnumerator AnalyzeCoroutine()

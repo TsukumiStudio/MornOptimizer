@@ -83,6 +83,10 @@ namespace MornLib
         private HashSet<string> _cascadeOrphans;
         private bool _selectAllUnused;
 
+        // パッケージ名 → そのパッケージのアセンブリ/DLLを参照している外部パッケージ名のセット
+        // (カスケード候補から除外するためのキャッシュ)
+        private Dictionary<string, HashSet<string>> _packageReferencedBy;
+
         protected override void DrawContent()
         {
             if (GUILayout.Button("解析開始", GUILayout.Height(30)))
@@ -186,52 +190,57 @@ namespace MornLib
                 return;
             }
 
-            // removing + cascadeOrphans の依存先をたどり、孤立するものを検出
-            var changed = true;
-            while (changed)
+            // removing の依存先をたどり、孤立するものを検出
+            // ユーザーが明示的にチェックしたもの (removing) のみを起点とし、1段階ずつ連鎖する
+            foreach (var pkgName in removing)
             {
-                changed = false;
-                var toCheck = new HashSet<string>(removing);
-                toCheck.UnionWith(_cascadeOrphans);
-
-                foreach (var pkgName in toCheck)
+                if (!_lockPackages.TryGetValue(pkgName, out var pkgData))
                 {
-                    if (!_lockPackages.TryGetValue(pkgName, out var pkgData))
+                    continue;
+                }
+
+                foreach (var depName in pkgData.DependencyNames)
+                {
+                    if (removing.Contains(depName) || _cascadeOrphans.Contains(depName))
                     {
                         continue;
                     }
 
-                    foreach (var depName in pkgData.DependencyNames)
+                    // コード/アセット/型で直接使用されているパッケージはカスケード対象外
+                    if (_resultMap.TryGetValue(depName, out var depResult) && depResult.DirectlyUsed)
                     {
-                        if (_cascadeOrphans.Contains(depName))
+                        continue;
+                    }
+
+                    if (!_dependedBy.TryGetValue(depName, out var users))
+                    {
+                        continue;
+                    }
+
+                    // 依存元が全てユーザー選択済みなら、この依存先も不要候補
+                    if (!users.All(u => removing.Contains(u)))
+                    {
+                        continue;
+                    }
+
+                    // コンパイル参照グラフでも、残存パッケージから参照されていないか確認
+                    if (_packageReferencedBy != null && _packageReferencedBy.TryGetValue(depName, out var refBy))
+                    {
+                        if (refBy.Any(r => !removing.Contains(r)))
                         {
                             continue;
-                        }
-
-                        // コード/アセット/型で直接使用されているパッケージはカスケード対象外
-                        if (_resultMap.TryGetValue(depName, out var depResult) && depResult.DirectlyUsed)
-                        {
-                            continue;
-                        }
-
-                        if (!_dependedBy.TryGetValue(depName, out var users))
-                        {
-                            continue;
-                        }
-
-                        if (users.All(u => removing.Contains(u) || _cascadeOrphans.Contains(u)))
-                        {
-                            _cascadeOrphans.Add(depName);
-                            changed = true;
                         }
                     }
+
+                    _cascadeOrphans.Add(depName);
                 }
             }
 
             // カスケード対象から外れた使用中パッケージの選択を解除
+            // ただし removing に含まれている（ユーザーが明示的にチェックした）ものは維持
             foreach (var r in _results)
             {
-                if (r.IsUsed && r.Selected && !_cascadeOrphans.Contains(r.PackageName))
+                if (r.IsUsed && r.Selected && !_cascadeOrphans.Contains(r.PackageName) && !removing.Contains(r.PackageName))
                 {
                     r.Selected = false;
                 }
@@ -689,9 +698,9 @@ namespace MornLib
                         }
 
                         // 見つかったモジュールを依存チェーンに追加
+                        // パッケージ経由の間接参照なので usedPackageNames (DirectlyUsed) には追加しない
                         foreach (var modulePkg in foundModules)
                         {
-                            usedPackageNames.Add(modulePkg);
                             allNeededPackages.Add(modulePkg);
                             dependencyParents.TryAdd(modulePkg, kvp.Key);
                         }
@@ -883,7 +892,199 @@ namespace MornLib
             }
 
             _cascadeOrphans = new HashSet<string>();
+
+            // パッケージ参照グラフをキャッシュ
+            _packageReferencedBy = BuildPackageReferenceGraph();
+
+            // 他パッケージから参照されているパッケージを使用中に修正
+            foreach (var r in _results)
+            {
+                if (r.IsUsed)
+                {
+                    continue;
+                }
+
+                if (!_packageReferencedBy.TryGetValue(r.PackageName, out var refBy) || refBy.Count == 0)
+                {
+                    continue;
+                }
+
+                r.IsUsed = true;
+                var refNames = refBy
+                    .Select(b => _resultMap.TryGetValue(b, out var br) ? br.DisplayName : b)
+                    .OrderBy(x => x);
+                r.UsageReason = $"← {string.Join(", ", refNames)} (パッケージ参照)";
+            }
+
             SetProgress("完了", 1f);
+        }
+
+        /// <summary>
+        /// CompilationPipeline から、パッケージ名 → そのパッケージを参照しているパッケージ名のセット を構築する。
+        /// assemblyReferences + compiledAssemblyReferences の両方を使う。
+        /// </summary>
+        private Dictionary<string, HashSet<string>> BuildPackageReferenceGraph()
+        {
+            var result = new Dictionary<string, HashSet<string>>();
+
+            // アセンブリ名 → パッケージ名
+            var asmToPackage = new Dictionary<string, string>();
+            // GUID → パッケージ名
+            var guidToPackage = new Dictionary<string, string>();
+            // DLL名 → パッケージ名
+            var dllNameToPackage = new Dictionary<string, string>();
+            // DLLフルパス → パッケージ名
+            var dllPathToPackage = new Dictionary<string, string>();
+            // asmdef ファイルリスト (パッケージ名付き)
+            var allAsmdefEntries = new List<(string PkgName, string AsmdefName, string Json)>();
+
+            var allPackages = PackageInfo.GetAllRegisteredPackages();
+            foreach (var pi in allPackages)
+            {
+                if (string.IsNullOrEmpty(pi.resolvedPath) || !Directory.Exists(pi.resolvedPath))
+                {
+                    continue;
+                }
+
+                foreach (var asmdefFile in Directory.GetFiles(pi.resolvedPath, "*.asmdef", SearchOption.AllDirectories))
+                {
+                    var json = File.ReadAllText(asmdefFile);
+                    var name = ExtractAsmdefName(json);
+                    if (string.IsNullOrEmpty(name))
+                    {
+                        continue;
+                    }
+
+                    asmToPackage[name] = pi.name;
+                    allAsmdefEntries.Add((pi.name, name, json));
+
+                    // GUID マッピング
+                    var metaPath = asmdefFile + ".meta";
+                    if (File.Exists(metaPath))
+                    {
+                        var metaText = File.ReadAllText(metaPath);
+                        var guidMatch = Regex.Match(metaText, @"guid:\s*([0-9a-f]+)");
+                        if (guidMatch.Success)
+                        {
+                            guidToPackage[guidMatch.Groups[1].Value] = pi.name;
+                        }
+                    }
+                }
+
+                foreach (var dll in Directory.GetFiles(pi.resolvedPath, "*.dll", SearchOption.AllDirectories))
+                {
+                    dllPathToPackage[Path.GetFullPath(dll)] = pi.name;
+                    dllNameToPackage[Path.GetFileName(dll)] = pi.name;
+                }
+            }
+
+            void AddRef(string refPkg, string srcPkg)
+            {
+                if (refPkg == srcPkg)
+                {
+                    return;
+                }
+
+                if (!result.TryGetValue(refPkg, out var set))
+                {
+                    set = new HashSet<string>();
+                    result[refPkg] = set;
+                }
+
+                set.Add(srcPkg);
+            }
+
+            // Layer 1: CompilationPipeline (テストアセンブリが含まれない場合がある)
+            var allAsm = CompilationPipeline.GetAssemblies(AssembliesType.PlayerWithoutTestAssemblies)
+                .Concat(CompilationPipeline.GetAssemblies(AssembliesType.Editor));
+
+            foreach (var asm in allAsm)
+            {
+                if (!asmToPackage.TryGetValue(asm.name, out var srcPkg))
+                {
+                    continue;
+                }
+
+                if (asm.assemblyReferences != null)
+                {
+                    foreach (var refAsm in asm.assemblyReferences)
+                    {
+                        if (asmToPackage.TryGetValue(refAsm.name, out var refPkg))
+                        {
+                            AddRef(refPkg, srcPkg);
+                        }
+                    }
+                }
+
+                if (asm.compiledAssemblyReferences != null)
+                {
+                    foreach (var refDllPath in asm.compiledAssemblyReferences)
+                    {
+                        if (dllPathToPackage.TryGetValue(Path.GetFullPath(refDllPath), out var refPkg))
+                        {
+                            AddRef(refPkg, srcPkg);
+                        }
+                    }
+                }
+            }
+
+            // Layer 2: asmdef ファイルの references + precompiledReferences を直接走査
+            // (テストアセンブリ等、CompilationPipeline に含まれないものを補完)
+            foreach (var (srcPkg, asmdefName, json) in allAsmdefEntries)
+            {
+                // references
+                var refsIdx = json.IndexOf("\"references\"", StringComparison.Ordinal);
+                if (refsIdx >= 0)
+                {
+                    var bStart = json.IndexOf('[', refsIdx);
+                    var bEnd = json.IndexOf(']', bStart);
+                    if (bStart >= 0 && bEnd >= 0)
+                    {
+                        var content = json.Substring(bStart + 1, bEnd - bStart - 1);
+                        foreach (Match m in Regex.Matches(content, "\"([^\"]+)\""))
+                        {
+                            var refName = m.Groups[1].Value;
+                            if (refName.StartsWith("GUID:"))
+                            {
+                                var guid = refName.Substring(5);
+                                if (guidToPackage.TryGetValue(guid, out var refPkg))
+                                {
+                                    AddRef(refPkg, srcPkg);
+                                }
+                            }
+                            else
+                            {
+                                if (asmToPackage.TryGetValue(refName, out var refPkg))
+                                {
+                                    AddRef(refPkg, srcPkg);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // precompiledReferences
+                var preIdx = json.IndexOf("\"precompiledReferences\"", StringComparison.Ordinal);
+                if (preIdx >= 0)
+                {
+                    var bStart = json.IndexOf('[', preIdx);
+                    var bEnd = json.IndexOf(']', bStart);
+                    if (bStart >= 0 && bEnd >= 0)
+                    {
+                        var content = json.Substring(bStart + 1, bEnd - bStart - 1);
+                        foreach (Match m in Regex.Matches(content, "\"([^\"]+)\""))
+                        {
+                            var dllName = m.Groups[1].Value;
+                            if (dllNameToPackage.TryGetValue(dllName, out var refPkg))
+                            {
+                                AddRef(refPkg, srcPkg);
+                            }
+                        }
+                    }
+                }
+            }
+
+            return result;
         }
 
         // ── ユーティリティ ──
@@ -1245,8 +1446,9 @@ namespace MornLib
         {
             var indent = result.FeatureGroup != null ? "    " : "";
             var isCascade = _cascadeOrphans != null && _cascadeOrphans.Contains(result.PackageName);
+            var isSelectedCascade = result.IsUsed && result.Selected;
 
-            if (isCascade)
+            if (isCascade || isSelectedCascade)
             {
                 // 連鎖で不要になるパッケージ → チェックボックス表示
                 var label = $"{indent}{result.DisplayName}  ({result.PackageName})  — 削除で不要になる";
@@ -1269,6 +1471,26 @@ namespace MornLib
 
         private void RemoveSelectedPackages(List<PackageAnalysisResult> toRemove)
         {
+            // 削除前バリデーション: カスタムパッケージのソースコードが削除対象に依存していないかチェック
+            var blocked = ValidateRemoval(toRemove);
+            if (blocked.Count > 0)
+            {
+                var blockedMsg = "以下のパッケージは他のカスタムパッケージから参照されているため削除できません:\n\n";
+                foreach (var (pkgName, reasons) in blocked)
+                {
+                    blockedMsg += $"■ {pkgName}\n";
+                    foreach (var reason in reasons)
+                    {
+                        blockedMsg += $"  {reason}\n";
+                    }
+
+                    blockedMsg += "\n";
+                }
+
+                EditorUtility.DisplayDialog("削除できません", blockedMsg, "OK");
+                return;
+            }
+
             // Feature サブパッケージの削除がある場合、Feature 自体を解体する
             var featuresToDissolve = new HashSet<string>();
             var featureUsedSubs = new Dictionary<string, List<PackageAnalysisResult>>();
@@ -1330,9 +1552,13 @@ namespace MornLib
             }
 
             if (!EditorUtility.DisplayDialog(
-                    "パッケージ削除確認",
-                    $"以下の変更を manifest.json に適用します:\n\n{string.Join("\n", msgLines)}\n\n続行しますか？",
-                    "実行する",
+                    "⚠ パッケージ削除確認",
+                    $"以下の変更を manifest.json に適用します:\n\n{string.Join("\n", msgLines)}\n\n" +
+                    "【警告】この操作は元に戻せません。\n" +
+                    "実行前に必ず git の差分を確認し、コミットまたはローカルバックアップを作成してください。\n" +
+                    "この操作によって発生した問題について、ツール側では一切の責任を負いません。\n\n" +
+                    "続行しますか？",
+                    "理解した上で実行する",
                     "キャンセル"))
             {
                 return;
@@ -1461,6 +1687,279 @@ namespace MornLib
 
             Client.Resolve();
             _results = null;
+        }
+
+        /// <summary>
+        /// 削除対象パッケージが、残るパッケージ (カスタムパッケージ含む) から参照されていないか検証する。
+        /// </summary>
+        private List<(string PackageName, List<string> Reasons)> ValidateRemoval(List<PackageAnalysisResult> toRemove)
+        {
+            var removingNames = new HashSet<string>(toRemove.Select(r => r.PackageName));
+            // 連鎖で不要になるパッケージも含める
+            if (_cascadeOrphans != null)
+            {
+                foreach (var orphan in _cascadeOrphans)
+                {
+                    if (_resultMap.TryGetValue(orphan, out var r) && r.Selected)
+                    {
+                        removingNames.Add(orphan);
+                    }
+                }
+            }
+
+            var blocked = new List<(string PackageName, List<string> Reasons)>();
+
+            // 削除対象パッケージが提供するアセンブリ名を収集
+            var removingAssemblyNames = new HashSet<string>();
+            var removingDllNames = new HashSet<string>();
+            foreach (var pkgName in removingNames)
+            {
+                var pi = PackageInfo.FindForPackageName(pkgName);
+                if (pi == null || string.IsNullOrEmpty(pi.resolvedPath))
+                {
+                    continue;
+                }
+
+                // asmdef 名を収集
+                if (Directory.Exists(pi.resolvedPath))
+                {
+                    var asmdefFiles = Directory.GetFiles(pi.resolvedPath, "*.asmdef", SearchOption.AllDirectories);
+                    foreach (var asmdefFile in asmdefFiles)
+                    {
+                        var name = ExtractAsmdefName(File.ReadAllText(asmdefFile));
+                        if (!string.IsNullOrEmpty(name))
+                        {
+                            removingAssemblyNames.Add(name);
+                        }
+                    }
+                }
+
+                // パッケージ内の DLL ファイル名を収集
+                if (Directory.Exists(pi.resolvedPath))
+                {
+                    foreach (var dll in Directory.GetFiles(pi.resolvedPath, "*.dll", SearchOption.AllDirectories))
+                    {
+                        removingDllNames.Add(Path.GetFileName(dll));
+                    }
+                }
+            }
+
+            if (removingAssemblyNames.Count == 0 && removingDllNames.Count == 0)
+            {
+                return blocked;
+            }
+
+            // 残るパッケージ (カスタムパッケージ + 通常パッケージ) の asmdef を走査
+            var allPackages = PackageInfo.GetAllRegisteredPackages();
+            foreach (var pi in allPackages)
+            {
+                if (removingNames.Contains(pi.name))
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(pi.resolvedPath) || !Directory.Exists(pi.resolvedPath))
+                {
+                    continue;
+                }
+
+                var asmdefFiles = Directory.GetFiles(pi.resolvedPath, "*.asmdef", SearchOption.AllDirectories);
+                foreach (var asmdefFile in asmdefFiles)
+                {
+                    var json = File.ReadAllText(asmdefFile);
+                    var asmdefName = ExtractAsmdefName(json);
+
+                    // references チェック
+                    var refsIdx = json.IndexOf("\"references\"", StringComparison.Ordinal);
+                    if (refsIdx >= 0)
+                    {
+                        var bStart = json.IndexOf('[', refsIdx);
+                        var bEnd = json.IndexOf(']', bStart);
+                        if (bStart >= 0 && bEnd >= 0)
+                        {
+                            var content = json.Substring(bStart + 1, bEnd - bStart - 1);
+                            foreach (Match m in Regex.Matches(content, "\"([^\"]+)\""))
+                            {
+                                var refName = m.Groups[1].Value;
+                                // GUID 参照の解決
+                                if (refName.StartsWith("GUID:"))
+                                {
+                                    var path = AssetDatabase.GUIDToAssetPath(refName.Substring(5));
+                                    if (!string.IsNullOrEmpty(path) && File.Exists(path))
+                                    {
+                                        var refJson = File.ReadAllText(path);
+                                        refName = ExtractAsmdefName(refJson) ?? refName;
+                                    }
+                                }
+
+                                if (removingAssemblyNames.Contains(refName))
+                                {
+                                    var reasons = blocked.FirstOrDefault(b => b.PackageName == refName).Reasons;
+                                    if (reasons == null)
+                                    {
+                                        reasons = new List<string>();
+                                        blocked.Add((refName, reasons));
+                                    }
+
+                                    reasons.Add($"← {pi.displayName} ({asmdefName})");
+                                }
+                            }
+                        }
+                    }
+
+                    // precompiledReferences チェック
+                    var preIdx = json.IndexOf("\"precompiledReferences\"", StringComparison.Ordinal);
+                    if (preIdx >= 0)
+                    {
+                        var bStart = json.IndexOf('[', preIdx);
+                        var bEnd = json.IndexOf(']', bStart);
+                        if (bStart >= 0 && bEnd >= 0)
+                        {
+                            var content = json.Substring(bStart + 1, bEnd - bStart - 1);
+                            foreach (Match m in Regex.Matches(content, "\"([^\"]+)\""))
+                            {
+                                var dllName = m.Groups[1].Value;
+                                if (removingDllNames.Contains(dllName))
+                                {
+                                    // この DLL がどの削除対象パッケージに属するか特定
+                                    foreach (var removePkg in removingNames)
+                                    {
+                                        var removePi = PackageInfo.FindForPackageName(removePkg);
+                                        if (removePi == null || !Directory.Exists(removePi.resolvedPath))
+                                        {
+                                            continue;
+                                        }
+
+                                        if (Directory.GetFiles(removePi.resolvedPath, dllName, SearchOption.AllDirectories).Length > 0)
+                                        {
+                                            var reasons = blocked.FirstOrDefault(b => b.PackageName == removePkg).Reasons;
+                                            if (reasons == null)
+                                            {
+                                                reasons = new List<string>();
+                                                blocked.Add((removePkg, reasons));
+                                            }
+
+                                            reasons.Add($"← {pi.displayName} ({asmdefName}) [DLL: {dllName}]");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+            }
+
+            // CompilationPipeline ベースのチェック: コンパイル済みアセンブリの参照グラフから検出
+            var allCompilationAssemblies = CompilationPipeline.GetAssemblies(AssembliesType.PlayerWithoutTestAssemblies)
+                .Concat(CompilationPipeline.GetAssemblies(AssembliesType.Editor))
+                .ToArray();
+
+            // 削除対象パッケージの DLL フルパスを収集 (compiledAssemblyReferences 用)
+            var removingDllFullPaths = new HashSet<string>();
+            // DLLフルパス → パッケージ名
+            var dllPathToPackage = new Dictionary<string, string>();
+            foreach (var pkgName in removingNames)
+            {
+                var pi = PackageInfo.FindForPackageName(pkgName);
+                if (pi == null || string.IsNullOrEmpty(pi.resolvedPath) || !Directory.Exists(pi.resolvedPath))
+                {
+                    continue;
+                }
+
+                foreach (var dll in Directory.GetFiles(pi.resolvedPath, "*.dll", SearchOption.AllDirectories))
+                {
+                    var fullPath = Path.GetFullPath(dll);
+                    removingDllFullPaths.Add(fullPath);
+                    dllPathToPackage[fullPath] = pkgName;
+                }
+            }
+
+            foreach (var asm in allCompilationAssemblies)
+            {
+                // 削除対象のアセンブリ自体はスキップ
+                if (removingAssemblyNames.Contains(asm.name))
+                {
+                    continue;
+                }
+
+                // このアセンブリがどのパッケージに属するか
+                var asmdefPath = CompilationPipeline.GetAssemblyDefinitionFilePathFromAssemblyName(asm.name);
+                if (string.IsNullOrEmpty(asmdefPath))
+                {
+                    continue;
+                }
+
+                var asmPkgInfo = PackageInfo.FindForAssetPath(asmdefPath);
+                if (asmPkgInfo == null || removingNames.Contains(asmPkgInfo.name))
+                {
+                    continue;
+                }
+
+                // チェック 1: assemblyReferences (asmdef ベースの参照)
+                if (asm.assemblyReferences != null)
+                {
+                    foreach (var refAsm in asm.assemblyReferences)
+                    {
+                        if (!removingAssemblyNames.Contains(refAsm.name))
+                        {
+                            continue;
+                        }
+
+                        var refAsmdefPath = CompilationPipeline.GetAssemblyDefinitionFilePathFromAssemblyName(refAsm.name);
+                        var refPkgName = refAsm.name;
+                        if (!string.IsNullOrEmpty(refAsmdefPath))
+                        {
+                            var refPkgInfo = PackageInfo.FindForAssetPath(refAsmdefPath);
+                            if (refPkgInfo != null)
+                            {
+                                refPkgName = refPkgInfo.name;
+                            }
+                        }
+
+                        if (!removingNames.Contains(refPkgName))
+                        {
+                            continue;
+                        }
+
+                        AddBlockedReason(blocked, refPkgName, $"← {asmPkgInfo.displayName} ({asm.name})");
+                    }
+                }
+
+                // チェック 2: compiledAssemblyReferences (プリコンパイル DLL 参照: nunit.framework.dll 等)
+                if (asm.compiledAssemblyReferences != null)
+                {
+                    foreach (var refDllPath in asm.compiledAssemblyReferences)
+                    {
+                        var fullRefPath = Path.GetFullPath(refDllPath);
+                        if (!removingDllFullPaths.Contains(fullRefPath))
+                        {
+                            continue;
+                        }
+
+                        if (dllPathToPackage.TryGetValue(fullRefPath, out var refPkgName))
+                        {
+                            AddBlockedReason(blocked, refPkgName,
+                                $"← {asmPkgInfo.displayName} ({asm.name}) [DLL: {Path.GetFileName(refDllPath)}]");
+                        }
+                    }
+                }
+            }
+
+            return blocked;
+        }
+
+        private static void AddBlockedReason(List<(string PackageName, List<string> Reasons)> blocked, string pkgName, string reason)
+        {
+            var existing = blocked.FirstOrDefault(b => b.PackageName == pkgName);
+            if (existing.Reasons == null)
+            {
+                blocked.Add((pkgName, new List<string> { reason }));
+            }
+            else if (!existing.Reasons.Contains(reason))
+            {
+                existing.Reasons.Add(reason);
+            }
         }
 
         private void FixTrailingCommas(List<string> lines)
