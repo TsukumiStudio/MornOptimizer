@@ -20,7 +20,9 @@ namespace MornLib
             _tabs = new MornOptimizerTabBase[]
             {
                 new MornOptimizerPackageTab(this),
+                new MornOptimizerAsmdefTab(this),
                 new MornOptimizerTextureTab(this),
+                new MornOptimizerTrimTab(this),
                 new MornOptimizerUnreferencedTab(this),
                 new MornOptimizerBuildSettingsTab(this),
             };
