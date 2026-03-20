@@ -8,6 +8,8 @@ namespace MornLib
         private MornOptimizerTabBase[] _tabs;
         private string[] _tabNames;
         private int _selectedTab;
+        private Texture2D _logo;
+        private string _version;
 
         [MenuItem("Tools/MornOptimizer")]
         private static void Open()
@@ -31,6 +33,36 @@ namespace MornLib
             {
                 _tabNames[i] = _tabs[i].TabName;
             }
+
+            // ロゴ画像読み込み
+            var guids = AssetDatabase.FindAssets("MornOptimizer t:texture2d");
+            foreach (var guid in guids)
+            {
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (path.EndsWith("MornOptimizer.png"))
+                {
+                    _logo = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+                    break;
+                }
+            }
+
+            // package.jsonからバージョン取得
+            _version = "unknown";
+            var packageGuids = AssetDatabase.FindAssets("package t:textasset");
+            foreach (var guid in packageGuids)
+            {
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (path.Contains("MornOptimizer") && path.EndsWith("package.json"))
+                {
+                    var json = AssetDatabase.LoadAssetAtPath<TextAsset>(path);
+                    if (json != null)
+                    {
+                        var packageInfo = JsonUtility.FromJson<PackageInfo>(json.text);
+                        _version = packageInfo.version;
+                    }
+                    break;
+                }
+            }
         }
 
         private void OnDisable()
@@ -53,10 +85,38 @@ namespace MornLib
                 OnEnable();
             }
 
+            DrawHeader();
+            EditorGUILayout.Space();
+
             _selectedTab = GUILayout.Toolbar(_selectedTab, _tabNames, GUILayout.Height(25));
             EditorGUILayout.Space();
 
             _tabs[_selectedTab].OnGUI();
+        }
+
+        private void DrawHeader()
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (_logo != null)
+                {
+                    GUILayout.Label(_logo, GUILayout.Width(32), GUILayout.Height(32));
+                }
+
+                using (new EditorGUILayout.VerticalScope())
+                {
+                    GUILayout.Label("Morn Optimizer", EditorStyles.boldLabel);
+                    GUILayout.Label($"v{_version}", EditorStyles.miniLabel);
+                }
+
+                GUILayout.FlexibleSpace();
+            }
+        }
+
+        [System.Serializable]
+        private struct PackageInfo
+        {
+            public string version;
         }
     }
 }
