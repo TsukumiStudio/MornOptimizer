@@ -1,6 +1,6 @@
 {
   "name": "com.tsukumistudio.mornoptimizer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "displayName": "MornOptimizer",
   "description": "Unityプロジェクトのビルドサイズを削減するためのエディタツール。パッケージ・asmdef・テクスチャ・アセット・ビルド設定を最適化する。",
   "unity": "6000.0",
