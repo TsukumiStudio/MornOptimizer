@@ -1,7 +1,7 @@
 # MornOptimizer
 
 <p align="center">
-  <img src="MornOptimizer.png" alt="MornOptimizer" width="640" />
+  <img src="Editor/MornOptimizer.png" alt="MornOptimizer" width="640" />
 </p>
 
 <p align="center">
