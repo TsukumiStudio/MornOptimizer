@@ -102,7 +102,7 @@ namespace MornLib
         private void SetTitleWithIcon()
         {
             titleContent = _icon != null
-                ? new GUIContent(" ", _icon)
+                ? new GUIContent(_icon)
                 : new GUIContent("MornOptimizer");
         }
 
