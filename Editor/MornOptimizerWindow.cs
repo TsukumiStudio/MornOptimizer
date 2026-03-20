@@ -5,10 +5,11 @@ namespace MornLib
 {
     public sealed class MornOptimizerWindow : EditorWindow
     {
+        private const string GitUrl = "https://github.com/TsukumiStudio/MornOptimizer";
+
         private MornOptimizerTabBase[] _tabs;
         private string[] _tabNames;
         private int _selectedTab;
-        private Texture2D _logo;
         private string _version;
 
         [MenuItem("Tools/MornOptimizer")]
@@ -32,18 +33,6 @@ namespace MornLib
             for (var i = 0; i < _tabs.Length; i++)
             {
                 _tabNames[i] = _tabs[i].TabName;
-            }
-
-            // ロゴ画像読み込み
-            var guids = AssetDatabase.FindAssets("MornOptimizer t:texture2d");
-            foreach (var guid in guids)
-            {
-                var path = AssetDatabase.GUIDToAssetPath(guid);
-                if (path.EndsWith("MornOptimizer.png"))
-                {
-                    _logo = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
-                    break;
-                }
             }
 
             // package.jsonからバージョン取得
@@ -98,18 +87,12 @@ namespace MornLib
         {
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (_logo != null)
-                {
-                    GUILayout.Label(_logo, GUILayout.Width(32), GUILayout.Height(32));
-                }
-
-                using (new EditorGUILayout.VerticalScope())
-                {
-                    GUILayout.Label("Morn Optimizer", EditorStyles.boldLabel);
-                    GUILayout.Label($"v{_version}", EditorStyles.miniLabel);
-                }
-
+                GUILayout.Label($"MornOptimizer v{_version}", EditorStyles.boldLabel);
                 GUILayout.FlexibleSpace();
+                if (GUILayout.Button("GitHub", EditorStyles.linkLabel))
+                {
+                    Application.OpenURL(GitUrl);
+                }
             }
         }
 
