@@ -11,11 +11,13 @@ namespace MornLib
         private string[] _tabNames;
         private int _selectedTab;
         private string _version;
+        private Texture2D _icon;
 
         [MenuItem("Tools/MornOptimizer")]
         private static void Open()
         {
-            GetWindow<MornOptimizerWindow>("Morn Optimizer");
+            var window = GetWindow<MornOptimizerWindow>();
+            window.SetTitleWithIcon();
         }
 
         private void OnEnable()
@@ -34,6 +36,20 @@ namespace MornLib
             {
                 _tabNames[i] = _tabs[i].TabName;
             }
+
+            // アイコン読み込み
+            var iconGuids = AssetDatabase.FindAssets("MornOptimizer_Icon t:texture2d");
+            foreach (var guid in iconGuids)
+            {
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (path.EndsWith("MornOptimizer_Icon.png"))
+                {
+                    _icon = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+                    break;
+                }
+            }
+
+            SetTitleWithIcon();
 
             // package.jsonからバージョン取得
             _version = "unknown";
@@ -81,6 +97,13 @@ namespace MornLib
             EditorGUILayout.Space();
 
             _tabs[_selectedTab].OnGUI();
+        }
+
+        private void SetTitleWithIcon()
+        {
+            titleContent = _icon != null
+                ? new GUIContent("MornOptimizer", _icon)
+                : new GUIContent("MornOptimizer");
         }
 
         private void DrawHeader()
