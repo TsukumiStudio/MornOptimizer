@@ -1,3 +1,4 @@
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -6,7 +7,6 @@ namespace MornLib
     public sealed class MornOptimizerWindow : EditorWindow
     {
         private const string GitUrl = "https://github.com/TsukumiStudio/MornOptimizer";
-
         private MornOptimizerTabBase[] _tabs;
         private string[] _tabNames;
         private int _selectedTab;
@@ -65,6 +65,7 @@ namespace MornLib
                         var packageInfo = JsonUtility.FromJson<PackageInfo>(json.text);
                         _version = packageInfo.version;
                     }
+
                     break;
                 }
             }
@@ -92,18 +93,26 @@ namespace MornLib
 
             DrawHeader();
             EditorGUILayout.Space();
-
             _selectedTab = GUILayout.Toolbar(_selectedTab, _tabNames, GUILayout.Height(25));
             EditorGUILayout.Space();
-
             _tabs[_selectedTab].OnGUI();
         }
 
         private void SetTitleWithIcon()
         {
             titleContent = _icon != null
-                ? new GUIContent("Optimizer", _icon)
+                ? new GUIContent(ToInvisibleUniqueText(nameof(MornOptimizerWindow)), _icon)
                 : new GUIContent("Optimizer");
+        }
+
+        /// <summary>
+        /// 文字列を不可視Unicode文字列にエンコードする。
+        /// 空文字だとUnityが同一ウィンドウと誤認するため、ユニークかつ不可視な文字列が必要。
+        /// </summary>
+        private static string ToInvisibleUniqueText(string name)
+        {
+            const string k = "\u200B\u2060\uFEFF\u200E\u200F\u2061\u2062\u2063";
+            return string.Concat(name.Select(c => $"{k[c >> 3 & 7]}{k[c & 7]}"));
         }
 
         private void DrawHeader()
