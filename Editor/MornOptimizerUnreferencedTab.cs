@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -10,6 +11,7 @@ namespace MornLib
     public sealed class MornOptimizerUnreferencedTab : MornOptimizerTabBase
     {
         private List<UnreferencedResult> _results;
+        private string _searchText = "";
         private readonly Dictionary<string, bool> _foldouts = new();
 
         public MornOptimizerUnreferencedTab(EditorWindow owner) : base(owner)
@@ -42,15 +44,28 @@ namespace MornLib
                 return;
             }
 
-            var totalSize = _results.Sum(r => r.FileSize);
-            EditorGUILayout.LabelField($"未参照アセット ({_results.Count}件, 合計 {FormatSize(totalSize)})", EditorStyles.boldLabel);
+            _searchText = EditorGUILayout.TextField("検索", _searchText);
+            var filtered = FilterResults(_results, _searchText);
+
+            var totalSize = filtered.Sum(r => r.FileSize);
+            EditorGUILayout.LabelField(
+                string.IsNullOrEmpty(_searchText)
+                    ? $"未参照アセット ({_results.Count}件, 合計 {FormatSize(totalSize)})"
+                    : $"未参照アセット ({filtered.Count}件 / 全{_results.Count}件, 表示中合計 {FormatSize(totalSize)})",
+                EditorStyles.boldLabel);
             EditorGUILayout.HelpBox("Resources.Load や Addressables 経由の参照は検出できません。削除前に確認してください。", MessageType.Warning);
             EditorGUILayout.Space();
+
+            if (filtered.Count == 0)
+            {
+                EditorGUILayout.HelpBox("検索条件に一致するアセットはありません。", MessageType.Info);
+                return;
+            }
 
             ScrollPos = EditorGUILayout.BeginScrollView(ScrollPos);
 
             // 型ごとにグループ化
-            var groups = _results.GroupBy(r => r.AssetType).OrderByDescending(g => g.Sum(r => r.FileSize));
+            var groups = filtered.GroupBy(r => r.AssetType).OrderByDescending(g => g.Sum(r => r.FileSize));
 
             foreach (var group in groups)
             {
@@ -75,7 +90,7 @@ namespace MornLib
                     EditorGUILayout.LabelField($"{result.AssetPath}  ({FormatSize(result.FileSize)})", EditorStyles.miniLabel);
                     if (GUILayout.Button("選択", GUILayout.Width(40)))
                     {
-                        var obj = AssetDatabase.LoadAssetAtPath<Object>(result.AssetPath);
+                        var obj = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(result.AssetPath);
                         if (obj != null)
                         {
                             EditorGUIUtility.PingObject(obj);
@@ -214,6 +229,19 @@ namespace MornLib
 
             _results = results;
             SetProgress("完了", 1f);
+        }
+
+        private static List<UnreferencedResult> FilterResults(List<UnreferencedResult> source, string search)
+        {
+            if (string.IsNullOrEmpty(search))
+            {
+                return source;
+            }
+
+            return source.Where(r =>
+                    (r.AssetPath != null && r.AssetPath.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0) ||
+                    (r.AssetType != null && r.AssetType.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0))
+                .ToList();
         }
 
         private string FormatSize(long bytes)
