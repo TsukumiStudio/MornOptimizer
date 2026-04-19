@@ -15,6 +15,7 @@ namespace MornLib
     public sealed class MornOptimizerTrimTab : MornOptimizerTabBase
     {
         private List<TrimResult> _results;
+        private string _searchText = "";
         private bool _selectAll;
         private int _alphaThreshold;
 
@@ -51,18 +52,23 @@ namespace MornLib
                 return;
             }
 
+            _searchText = EditorGUILayout.TextField("検索", _searchText);
+            var filtered = FilterResults(_results, _searchText);
+
             // サマリー
-            var totalSaved = _results.Sum(r => r.OriginalFileSize - r.EstimatedFileSize);
+            var totalSaved = filtered.Sum(r => r.OriginalFileSize - r.EstimatedFileSize);
             EditorGUILayout.LabelField(
-                $"トリミング可能: {_results.Count} 件 (推定削減: {FormatBytes(totalSaved)})",
+                string.IsNullOrEmpty(_searchText)
+                    ? $"トリミング可能: {_results.Count} 件 (推定削減: {FormatBytes(totalSaved)})"
+                    : $"トリミング可能: {filtered.Count} 件 / 全{_results.Count}件 (表示中の推定削減: {FormatBytes(totalSaved)})",
                 EditorStyles.boldLabel);
             EditorGUILayout.Space();
 
             EditorGUI.BeginChangeCheck();
-            _selectAll = EditorGUILayout.ToggleLeft("全て選択", _selectAll);
+            _selectAll = EditorGUILayout.ToggleLeft("表示中を全て選択", _selectAll);
             if (EditorGUI.EndChangeCheck())
             {
-                foreach (var r in _results)
+                foreach (var r in filtered)
                 {
                     r.Selected = _selectAll;
                 }
@@ -70,7 +76,7 @@ namespace MornLib
 
             ScrollPos = EditorGUILayout.BeginScrollView(ScrollPos);
 
-            foreach (var result in _results)
+            foreach (var result in filtered)
             {
                 EditorGUILayout.BeginVertical(EditorStyles.helpBox);
 
@@ -359,6 +365,18 @@ namespace MornLib
             UnityEngine.Object.DestroyImmediate(dstTex);
 
             File.WriteAllBytes(fullPath, pngBytes);
+        }
+
+        private static List<TrimResult> FilterResults(List<TrimResult> source, string search)
+        {
+            if (string.IsNullOrEmpty(search))
+            {
+                return source;
+            }
+
+            return source.Where(r =>
+                    r.AssetPath != null && r.AssetPath.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0)
+                .ToList();
         }
 
         private static int FloorTo4(int v)

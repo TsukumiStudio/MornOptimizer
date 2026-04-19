@@ -11,6 +11,7 @@ namespace MornLib
     public sealed class MornOptimizerTextureTab : MornOptimizerTabBase
     {
         private List<TextureResult> _results;
+        private string _searchText = "";
         private bool _selectAll;
 
         public MornOptimizerTextureTab(EditorWindow owner) : base(owner)
@@ -40,14 +41,21 @@ namespace MornLib
                 return;
             }
 
-            EditorGUILayout.LabelField($"最適化可能なテクスチャ ({_results.Count}件)", EditorStyles.boldLabel);
+            _searchText = EditorGUILayout.TextField("検索", _searchText);
+            var filtered = FilterResults(_results, _searchText);
+
+            EditorGUILayout.LabelField(
+                string.IsNullOrEmpty(_searchText)
+                    ? $"最適化可能なテクスチャ ({_results.Count}件)"
+                    : $"最適化可能なテクスチャ ({filtered.Count}件 / 全{_results.Count}件)",
+                EditorStyles.boldLabel);
             EditorGUILayout.Space();
 
             EditorGUI.BeginChangeCheck();
-            _selectAll = EditorGUILayout.ToggleLeft("全て選択", _selectAll);
+            _selectAll = EditorGUILayout.ToggleLeft("表示中を全て選択", _selectAll);
             if (EditorGUI.EndChangeCheck())
             {
-                foreach (var r in _results)
+                foreach (var r in filtered)
                 {
                     r.Selected = _selectAll;
                 }
@@ -55,7 +63,7 @@ namespace MornLib
 
             ScrollPos = EditorGUILayout.BeginScrollView(ScrollPos);
 
-            foreach (var result in _results)
+            foreach (var result in filtered)
             {
                 EditorGUILayout.BeginVertical(EditorStyles.helpBox);
 
@@ -213,6 +221,19 @@ namespace MornLib
 
             Debug.Log($"[MornOptimizer] {count} 件のテクスチャ設定を修正しました。");
             _results = null;
+        }
+
+        private static List<TextureResult> FilterResults(List<TextureResult> source, string search)
+        {
+            if (string.IsNullOrEmpty(search))
+            {
+                return source;
+            }
+
+            return source.Where(r =>
+                    (r.AssetPath != null && r.AssetPath.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0) ||
+                    (r.Issues != null && r.Issues.Any(i => i.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0)))
+                .ToList();
         }
 
         private int NextPowerOfTwo(int v)
